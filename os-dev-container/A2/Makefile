@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS = -Wall -Wextra -pthread -g
+CFLAGS = -Wall -Wextra -pthread
 TARGET = A2
 all: $(TARGET)
 $(TARGET): A2.c

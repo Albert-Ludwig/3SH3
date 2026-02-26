@@ -1,5 +1,6 @@
+// gcc -Wall -Wextra -pthread -g -o A2 A2.c
+// ./ A2<num_students>
 #define _DEFAULT_SOURCE
-
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +9,11 @@
 #include <time.h>
 #include <stdint.h>
 
+/* Added for named semaphores on macOS */
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <string.h>
+
 #define NUM_CHAIR 3
 #define MAX_HELP 3                  // in order to avoid the infinite loop of the student just set a random number of max participation of each student thread
 #define PROGRAMMING_MIN_TIME 200000 // us
@@ -15,20 +21,24 @@
 #define HELP_MIN_TIME 200000        // us
 #define HELP_MAX_TIME 700000        // us
 
-pthread_mutex_t mutex;
-int waiting_student = 0;
-int queue_id[NUM_CHAIR];
-int in_idx = 0;
-int out_idx = 0;
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static int waiting_student = 0; /* number of students waiting in hallway chairs */
+static int queue_id[NUM_CHAIR]; /* circular queue of waiting student IDs */
+static int in_idx = 0, out_idx = 0;
 
-int N = 0;                // number of students
-int total_help_times = 0; // total times of help provided by the TA
+static int N = 0;                   /* number of students */
+static int total_help_needed = 0;   /* total successful helps needed before TA exits */
+static int total_help_provided = 0; /* total successful helps already provided */
 
-sem_t waiting_student_sem;
-sem_t *student_called_sem = NULL;
-sem_t *help_done_sem = NULL;
+/* Switched to named semaphores on macOS (sem_init/sem_destroy are deprecated) */
+static sem_t *waiting_student_sem = NULL; /* counts waiting students; TA sleeps on this */
+static sem_t **student_called_sem = NULL; /* per-student: TA calls student */
+static sem_t **help_done_sem = NULL;      /* per-student: TA finished helping */
 
-int rand_range(int low, int high)
+/* Added: store semaphore names for cleanup (unlink) */
+static char waiting_sem_name[64];
+
+int rand_range(int low, int high) // returns a random integer in the inclusive range [low, high]
 {
     if (high <= low)
     {
@@ -38,121 +48,231 @@ int rand_range(int low, int high)
 }
 void rand_sleep(int low, int high)
 {
-    usleep((unsigned int)rand_range(low, high));
+    usleep((unsigned int)rand_range(low, high)); // sleep for random time in given range
 }
 void enqueue_student(int student_id)
 {
     queue_id[in_idx] = student_id;
-    in_idx = (in_idx + 1) % NUM_CHAIR;
+    in_idx = (in_idx + 1) % NUM_CHAIR; // move to next position in circular queue
 }
 int dequeue_student(void)
 {
-    int student_id = queue_id[out_idx];
-    out_idx = (out_idx + 1) % NUM_CHAIR;
+    int student_id = queue_id[out_idx];  // get student ID at front of queue
+    out_idx = (out_idx + 1) % NUM_CHAIR; // move to next position
     return student_id;
 }
 
-void *TA_runner(void *param)
+static void *TA_runner(void *param)
 {
     (void)param;
-    for (int current_served = 0; current_served < MAX_HELP * N; current_served++)
+
+    while (1)
     {
-        sem_wait(&waiting_student_sem);     // if there is no students are waiting, then TA sleeps.
-        pthread_mutex_lock(&mutex);         // if there is a student is waiting, lock the mutex.
-        int student_id = dequeue_student(); // check the student id
-        waiting_student--;                  // remove a student from chair
-        pthread_mutex_unlock(&mutex);       // after editing the shared variable, unlock the mutex
-        printf("TA is calling the student %d.\n", student_id);
-        sem_post(&student_called_sem[student_id]); // release the semaphore of student_called so that the corresponding student can be waken up
-        printf("TA is helping the student %d.\n", student_id);
-        rand_sleep(HELP_MIN_TIME, HELP_MAX_TIME); // the occupation (help time) should be random
-        printf("TA is done helping the student %d.\n", student_id);
-        sem_post(&help_done_sem[student_id]); // release the semaphore of help_done so that the corresponding student can be waken up and leave the office
+        /* If no students are waiting, TA sleeps here */
+        sem_wait(waiting_student_sem);
+
+        pthread_mutex_lock(&mutex);
+
+        /* Dequeue next waiting student */
+        int student_id = dequeue_student();
+        waiting_student--;
+
+        pthread_mutex_unlock(&mutex);
+
+        printf("TA is calling student %d.\n", student_id);
+        sem_post(student_called_sem[student_id]); // wake up the student to be helped
+
+        printf("TA is helping student %d.\n", student_id);
+        rand_sleep(HELP_MIN_TIME, HELP_MAX_TIME); // simulate time taken to help
+        printf("TA is done helping student %d.\n", student_id);
+
+        /* Mark one successful help */
+        pthread_mutex_lock(&mutex);
+        total_help_provided++;
+        int done = (total_help_provided >= total_help_needed);
+        pthread_mutex_unlock(&mutex);
+
+        sem_post(help_done_sem[student_id]);
+
+        if (done)
+        {
+            /* Wake TA once so it can notice done and exit cleanly if it sleeps again */
+            break;
+        }
     }
-    pthread_exit(0);
+
+    pthread_exit(NULL);
 }
 
-void *student_runner(void *param)
+static void *student_runner(void *param)
 {
     int student_id = *(int *)param;
-    for (int current_asked = 0; current_asked < MAX_HELP; current_asked++)
+
+    int helps_received = 0;
+    while (helps_received < MAX_HELP)
     {
-        printf("Student %d is programming. \n", student_id);
+        printf("Student %d is programming.\n", student_id);
         rand_sleep(PROGRAMMING_MIN_TIME, PROGRAMMING_MAX_TIME);
-        pthread_mutex_lock(&mutex);      // enter the CS
-        if (waiting_student < NUM_CHAIR) // if there is an empty chair
+
+        pthread_mutex_lock(&mutex);
+
+        if (waiting_student < NUM_CHAIR)
         {
             enqueue_student(student_id);
-            waiting_student++; // sit down and wait
-            printf("Student %d is waiting. \n", student_id);
-            pthread_mutex_unlock(&mutex);              // finish editing the shared variable and leave the CS
-            sem_post(&waiting_student_sem);            // wake up the TA if it is sleeping
-            sem_wait(&student_called_sem[student_id]); // wait for the TA to call
-            printf("Student %d is getting help. \n", student_id);
-            sem_wait(&help_done_sem[student_id]); // wait for the TA to finish helping
-            printf("Student %d is done getting help. \n", student_id);
+            waiting_student++;
+            printf("Student %d is waiting in the hallway (%d/%d chairs occupied).\n",
+                   student_id, waiting_student, NUM_CHAIR);
+
+            pthread_mutex_unlock(&mutex);
+
+            /* Notify TA */
+            sem_post(waiting_student_sem);
+
+            /* Wait to be called, then wait until help is finished */
+            sem_wait(student_called_sem[student_id]);
+            printf("Student %d is getting help.\n", student_id);
+
+            sem_wait(help_done_sem[student_id]);
+            helps_received++;
+            printf("Student %d is done getting help (%d/%d).\n",
+                   student_id, helps_received, MAX_HELP);
         }
         else
         {
-            printf("There is no more chair, student %d is back to programming. \n", student_id);
-            pthread_mutex_unlock(&mutex); // leave the CS
+            /* No chair available -> come back later (does NOT count as a help) */
+            printf("No hallway chair available; student %d will come back later.\n", student_id);
+            pthread_mutex_unlock(&mutex);
         }
     }
+
     return NULL;
 }
 
-int main(int arg, char *argv[])
+int main(int argc, char *argv[])
 {
-    if (arg < 2)
+    if (argc < 2)
     {
-        printf("Usage: %s <num_students>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <num_students>\n", argv[0]);
         return 1;
     }
+
     N = atoi(argv[1]);
     if (N <= 0)
     {
-        printf("The number of students should be a positive integer number.\n");
+        fprintf(stderr, "Number of students must be a positive integer.\n");
         return 1;
     }
-    srand((unsigned)time(NULL)); // seed the random number generator with the current time
-    total_help_times = MAX_HELP * N;
-    if (pthread_mutex_init(&mutex, NULL) != 0)
+
+    srand((unsigned)time(NULL));
+
+    for (int i = 0; i < NUM_CHAIR; i++)
+        queue_id[i] = -1;
+
+    total_help_needed = MAX_HELP * N;
+    total_help_provided = 0;
+
+    /* Added: create a unique named semaphore for this process */
+    snprintf(waiting_sem_name, sizeof(waiting_sem_name), "/waiting_student_sem_%d", (int)getpid());
+    sem_unlink(waiting_sem_name); /* Added: remove leftover semaphore name if it exists */
+    waiting_student_sem = sem_open(waiting_sem_name, O_CREAT | O_EXCL, 0600, 0);
+    if (waiting_student_sem == SEM_FAILED)
     {
-        printf("Failed to initialize mutex.\n");
+        perror("sem_open(waiting_student_sem)");
         return 1;
     }
-    student_called_sem = (sem_t *)malloc(N * sizeof(sem_t));
-    help_done_sem = (sem_t *)malloc(N * sizeof(sem_t));
+
+    /* Allocate arrays of semaphore pointers (named semaphores) */
+    student_called_sem = malloc((size_t)N * sizeof(*student_called_sem));
+    help_done_sem = malloc((size_t)N * sizeof(*help_done_sem));
     if (!student_called_sem || !help_done_sem)
     {
-        printf("malloc failed\n");
+        fprintf(stderr, "malloc failed\n");
         return 1;
     }
-    if (sem_init(&waiting_student_sem, 0, 0) != 0)
-    {
-        printf("Failed to initialize waiting_student_sem.\n");
-        return 1;
-    }
+
+    char temp_called_name[64];
+    char temp_done_name[64];
+
     for (int i = 0; i < N; i++)
     {
-        sem_init(&student_called_sem[i], 0, 0);
-        sem_init(&help_done_sem[i], 0, 0);
+        /* Added: allocate and build unique names per student semaphore */
+        snprintf(temp_called_name, 64, "/student_called_sem_%d_%d", (int)getpid(), i);
+        snprintf(temp_done_name, 64, "/help_done_sem_%d_%d", (int)getpid(), i);
+
+        sem_unlink(temp_called_name); /* Added: avoid leftover named semaphores */
+        sem_unlink(temp_done_name);
+
+        student_called_sem[i] = sem_open(temp_called_name, O_CREAT | O_EXCL, 0600, 0);
+        if (student_called_sem[i] == SEM_FAILED)
+        {
+            perror("sem_open(student_called_sem)");
+            return 1;
+        }
+
+        help_done_sem[i] = sem_open(temp_done_name, O_CREAT | O_EXCL, 0600, 0);
+        if (help_done_sem[i] == SEM_FAILED)
+        {
+            perror("sem_open(help_done_sem)");
+            return 1;
+        }
     }
-    pthread_t TA_tid;
-    pthread_t *student_tid = (pthread_t *)malloc(N * sizeof(pthread_t));
-    int *student_id = (int *)malloc(N * sizeof(int));
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_create(&TA_tid, &attr, TA_runner, NULL);
+
+    pthread_t ta_tid;
+    pthread_t *student_tid = malloc((size_t)N * sizeof(*student_tid));
+    int *student_id = malloc((size_t)N * sizeof(*student_id));
+    if (!student_tid || !student_id)
+    {
+        fprintf(stderr, "malloc failed\n");
+        return 1;
+    }
+
+    if (pthread_create(&ta_tid, NULL, TA_runner, NULL) != 0)
+    {
+        perror("pthread_create(TA)");
+        return 1;
+    }
+
     for (int i = 0; i < N; i++)
     {
         student_id[i] = i;
-        pthread_create(&student_tid[i], &attr, student_runner, &student_id[i]);
+        if (pthread_create(&student_tid[i], NULL, student_runner, &student_id[i]) != 0)
+        {
+            perror("pthread_create(student)");
+            return 1;
+        }
     }
+
+    for (int i = 0; i < N; i++)
+        pthread_join(student_tid[i], NULL);
+    pthread_join(ta_tid, NULL);
+
+    /* Cleanup */
     for (int i = 0; i < N; i++)
     {
-        pthread_join(student_tid[i], NULL);
+        /* Added: close + unlink named semaphores */
+        if (student_called_sem[i] && student_called_sem[i] != SEM_FAILED)
+            sem_close(student_called_sem[i]);
+        if (help_done_sem[i] && help_done_sem[i] != SEM_FAILED)
+            sem_close(help_done_sem[i]);
+
+        snprintf(temp_called_name, 64, "/student_called_sem_%d_%d", (int)getpid(), i);
+        snprintf(temp_done_name, 64, "/help_done_sem_%d_%d", (int)getpid(), i);
+        sem_unlink(temp_called_name);
+        sem_unlink(temp_done_name);
     }
-    pthread_join(TA_tid, NULL);
+
+    /* Added: close + unlink the global named semaphore */
+    if (waiting_student_sem && waiting_student_sem != SEM_FAILED)
+        sem_close(waiting_student_sem);
+    sem_unlink(waiting_sem_name);
+
+    free(student_called_sem);
+    free(help_done_sem);
+    free(student_tid);
+    free(student_id);
+
+    pthread_mutex_destroy(&mutex);
+
+    printf("Simulation finished: TA provided %d/%d helps.\n", total_help_provided, total_help_needed);
     return 0;
 }
