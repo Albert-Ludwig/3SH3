@@ -11,7 +11,7 @@ Hongliang Qi 400493278
 
 ## Assignment contribution description:
 
-For the A2, I, student Johnson Ji design the logic of the code and implement it and student Hongliang Qi test the code and write the makefile.
+For the A2, I, student Johnson Ji design the logic of the code and implement it and student Hongliang Qi test the code and write the makefile. Note: for easy to debug and observe, I add the max time for each student to get help, which is not included in the rubric. The value I set is 3.
 
 ## Explaination for this assignment:
 

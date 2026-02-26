@@ -1,5 +1,5 @@
 // gcc -Wall -Wextra -pthread -g -o A2 A2.c
-// ./ A2 <num_students>
+// ./A2 <num_students>
 #define _DEFAULT_SOURCE
 #include <pthread.h>
 #include <stdio.h>
