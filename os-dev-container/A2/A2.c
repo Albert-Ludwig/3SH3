@@ -1,5 +1,5 @@
 // gcc -Wall -Wextra -pthread -g -o A2 A2.c
-// ./ A2<num_students>
+// ./ A2 <num_students>
 #define _DEFAULT_SOURCE
 #include <pthread.h>
 #include <stdio.h>
@@ -12,7 +12,6 @@
 /* Added for named semaphores on macOS */
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <string.h>
 
 #define NUM_CHAIR 3
 #define MAX_HELP 3                  // in order to avoid the infinite loop of the student just set a random number of max participation of each student thread
@@ -73,6 +72,20 @@ static void *TA_runner(void *param)
 
         pthread_mutex_lock(&mutex);
 
+        /* Added: allow TA to exit cleanly once enough helps are provided */
+        if (total_help_provided >= total_help_needed)
+        {
+            pthread_mutex_unlock(&mutex);
+            break;
+        }
+
+        /* Added: safety guard in case semaphore count and waiting_student desync */
+        if (waiting_student <= 0)
+        {
+            pthread_mutex_unlock(&mutex);
+            continue;
+        }
+
         /* Dequeue next waiting student */
         int student_id = dequeue_student();
         waiting_student--;
@@ -97,6 +110,8 @@ static void *TA_runner(void *param)
         if (done)
         {
             /* Wake TA once so it can notice done and exit cleanly if it sleeps again */
+            /* Added: wake TA in case it goes back to sleep before checking 'done' */
+            sem_post(waiting_student_sem);
             break;
         }
     }
