@@ -4,7 +4,7 @@
 
 #define BUFFER_SIZE 256
 #define OFFSET_BITS 12
-#define OFFSET_MASK ((1U << OFFSET_BITS) - 1U) // 0xFFF
+#define OFFSET_MASK ((1U << OFFSET_BITS) - 1U) // 0xFFF low 12 bits
 
 int main(void)
 {
