@@ -13,7 +13,7 @@ Hongliang Qi 400493278
 
 In the A3, I, the student Johnson Ji, develop the logic algorithm of the FIFO paging in/out strategy and the TLB working logic, and doing the test for the output.
 
-## Explaination for this assignment:
+## Explain for this assignment:
 
 This assignment is a simple virtual memory simulator written in C. The goal is to translate logical addresses into physical addresses by simulating how an MMU works with a page table, a TLB, and physical memory. The program reads logical addresses from addresses.txt, separates each address into a page number and an offset, and then tries to find the corresponding frame number. The required translation process is: check the TLB first, then the page table, and if the page is not in memory, generate a page fault.
 
