@@ -30,7 +30,7 @@ typedef struct FIB
     int inUse;         // 0 = free, 1 = occupied
 } FIB;
 
-typedef struct FileSystem
+typedef struct Volume_control_block
 {
     FreeBlockNode *freeHead;
     FreeBlockNode *freeTail;
@@ -41,7 +41,11 @@ typedef struct FileSystem
     FIB files[MAX_FILES];
 
     int fileCount;
-} FileSystem;
+} Volume_control_block;
+typedef struct FileSystem
+{
+    Volume_control_block vcb;
+};
 
 /* required operations */
 void initFS(FileSystem *fs);
