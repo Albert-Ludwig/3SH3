@@ -44,16 +44,13 @@ Block *allocateFreeBlock(FileSystem *fs) // remove and return a free block from 
     {
         return NULL;
     }
-
     FreeBlockNode *temp = fs->freeHead; // store current head node in temp
     Block *freeBlock = temp->block;     // get the block pointer from temp node
-
-    fs->freeHead = fs->freeHead->next; // move head pointer to next node in list
-    if (fs->freeHead == NULL)          // if list is now empty after removing head, set tail to NULL as well
+    fs->freeHead = fs->freeHead->next;  // move head pointer to next node in list
+    if (fs->freeHead == NULL)           // if list is now empty after removing head, set tail to NULL as well
     {
         fs->freeTail = NULL;
     }
-
     free(temp);
     return freeBlock;
 }
@@ -64,7 +61,6 @@ void returnFreeBlock(FileSystem *fs, Block *block) // add a block back to the ta
     {
         return;
     }
-
     /* clear block data before returning it */
     memset(block->data, 0, BLOCK_SIZE);
 
@@ -74,10 +70,8 @@ void returnFreeBlock(FileSystem *fs, Block *block) // add a block back to the ta
         printf("Error: unable to return block %d to free list.\n", block->blockNumber);
         return;
     }
-
     newNode->block = block;
     newNode->next = NULL;
-
     if (fs->freeTail == NULL) // if free block list is currently empty, set both head and tail to new node
     {
         fs->freeHead = newNode;
@@ -96,7 +90,6 @@ void printFreeBlocks(const FileSystem *fs) // utility function to print the bloc
     {
         return;
     }
-
     int count = countFreeBlocks(fs); // count the number of free blocks for display
     printf("Free Blocks (%d): ", count);
 
@@ -115,7 +108,6 @@ void initFS(FileSystem *fs) // initialize the filesystem structure, including di
     {
         return;
     }
-
     fs->freeHead = NULL; // initialize free block list pointers to NULL
     fs->freeTail = NULL; // initialize free block list pointers to NULL
     fs->fileCount = 0;   // initialize file count to 0
@@ -126,7 +118,6 @@ void initFS(FileSystem *fs) // initialize the filesystem structure, including di
         memset(fs->disk[i].data, 0, BLOCK_SIZE); // clear block data
         fs->disk[i].blockNumber = i;             // set block number for each block
     }
-
     /* initialize FIB table */
     for (int i = 0; i < MAX_FILES; i++)
     {
@@ -138,7 +129,6 @@ void initFS(FileSystem *fs) // initialize the filesystem structure, including di
         fs->files[i].indexBlock = NULL;
         fs->files[i].inUse = 0;
     }
-
     /* build free block linked list with all blocks */
     for (int i = 0; i < TOTAL_BLOCKS; i++)
     {
@@ -148,11 +138,9 @@ void initFS(FileSystem *fs) // initialize the filesystem structure, including di
             printf("Error: memory allocation failed while initializing filesystem.\n");
             return;
         }
-
         node->block = &fs->disk[i]; // set block pointer in node to current block
         node->next = NULL;          // initialize next pointer to NULL
-
-        if (fs->freeTail == NULL) // if free block list is currently empty, set both head and tail to new node
+        if (fs->freeTail == NULL)   // if free block list is currently empty, set both head and tail to new node
         {
             fs->freeHead = node;
             fs->freeTail = node;
@@ -180,20 +168,17 @@ int createFile(FileSystem *fs, const char *filename, int size) // create a new f
         printf("Error: maximum number of files reached.\n");
         return 0;
     }
-
     if (findFileByName(fs, filename) != -1) // check if a file with the same name already exists before creating a new file
     {
         printf("Error: file '%s' already exists.\n", filename);
         return 0;
     }
-
     int fibIndex = findFreeFIB(fs); // find an available FIB entry for the new file, or -1 if none available
     if (fibIndex == -1)             // if no free FIB entry is found, return an error
     {
         printf("Error: no free FIB available.\n");
         return 0;
     }
-
     int dataBlocksNeeded = (size + BLOCK_SIZE - 1) / BLOCK_SIZE; // calculate the number of data blocks needed to store the file, rounding up to the nearest block
     int totalBlocksNeeded = dataBlocksNeeded + 1;                /* +1 for index block */
 
@@ -202,7 +187,6 @@ int createFile(FileSystem *fs, const char *filename, int size) // create a new f
         printf("Error: not enough free blocks for file '%s'.\n", filename);
         return 0;
     }
-
     /* allocate index block first */
     Block *indexBlock = allocateFreeBlock(fs);
     if (indexBlock == NULL) // if allocation of index block fails, return an error
@@ -210,7 +194,6 @@ int createFile(FileSystem *fs, const char *filename, int size) // create a new f
         printf("Error: failed to allocate index block.\n");
         return 0;
     }
-
     /* store data block numbers inside index block->data */
     int *indexEntries = (int *)indexBlock->data;
 
@@ -242,9 +225,7 @@ int createFile(FileSystem *fs, const char *filename, int size) // create a new f
     fs->files[fibIndex].blockCount = dataBlocksNeeded;
     fs->files[fibIndex].indexBlock = indexBlock;
     fs->files[fibIndex].inUse = 1;
-
     fs->fileCount++;
-
     printf("File '%s' created with %d data blocks + 1 index block.\n",
            filename, dataBlocksNeeded);
 
@@ -257,27 +238,22 @@ int deleteFile(FileSystem *fs, const char *filename) // delete the file with the
     {
         return 0;
     }
-
     int fileIndex = findFileByName(fs, filename); // find the index of the file to be deleted by its name, or -1 if not found
     if (fileIndex == -1)                          // if file is not found, return an error
     {
         printf("Error: file '%s' not found.\n", filename);
         return 0;
     }
-
     FIB *file = &fs->files[fileIndex];                 // get a pointer to the FIB entry for the file being deleted
     int *indexEntries = (int *)file->indexBlock->data; // get a pointer to the array of data block numbers stored in the file's index block
-
     /* return all data blocks to tail */
     for (int i = 0; i < file->blockCount; i++)
     {
         int blkNum = indexEntries[i];
         returnFreeBlock(fs, &fs->disk[blkNum]);
     }
-
     /* return index block last */
     returnFreeBlock(fs, file->indexBlock);
-
     /* clear FIB */
     fs->fibStatus[fileIndex] = 0;
     file->fileName[0] = '\0';
@@ -285,7 +261,6 @@ int deleteFile(FileSystem *fs, const char *filename) // delete the file with the
     file->blockCount = 0;
     file->indexBlock = NULL;
     file->inUse = 0;
-
     fs->fileCount--;
 
     printf("File '%s' deleted.\n", filename);
@@ -298,7 +273,6 @@ void listFiles(const FileSystem *fs) // list all files currently in the filesyst
     {
         return;
     }
-
     printf("\nRoot Directory Listing (%d files):\n", fs->fileCount);
 
     for (int i = 0; i < MAX_FILES; i++) // loop through FIB status array and print details of each file that is currently in use (status = 1)
