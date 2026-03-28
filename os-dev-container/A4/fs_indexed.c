@@ -5,11 +5,11 @@
 static int countFreeBlocks(const FileSystem *fs)
 {
     int count = 0;
-    FreeBlockNode *curr = fs->freeHead; // start from head of free block list
-    while (curr != NULL)                // traverse until end of list
+    FreeBlockNode *current = fs->freeHead; // start from head of free block list
+    while (current != NULL)                // traverse until end of list
     {
         count++;
-        curr = curr->next;
+        current = current->next;
     }
     return count;
 }
@@ -93,11 +93,11 @@ void printFreeBlocks(const FileSystem *fs) // utility function to print the bloc
     int count = countFreeBlocks(fs); // count the number of free blocks for display
     printf("Free Blocks (%d): ", count);
 
-    FreeBlockNode *curr = fs->freeHead; // start from head of free block list
-    while (curr != NULL)                // traverse until end of list
+    FreeBlockNode *current = fs->freeHead; // start from head of free block list
+    while (current != NULL)                // traverse until end of list
     {
-        printf("[%d] -> ", curr->block->blockNumber);
-        curr = curr->next;
+        printf("[%d] -> ", current->block->blockNumber);
+        current = current->next;
     }
     printf("NULL\n");
 }
@@ -205,8 +205,8 @@ int createFile(FileSystem *fs, const char *filename, int size) // create a new f
             /* rollback already allocated blocks */
             for (int j = 0; j < i; j++)
             {
-                int blkNum = indexEntries[j];
-                returnFreeBlock(fs, &fs->disk[blkNum]);
+                int blocknumber = indexEntries[j];
+                returnFreeBlock(fs, &fs->disk[blocknumber]);
             }
             returnFreeBlock(fs, indexBlock);
             printf("Error: failed while allocating data blocks.\n");
@@ -249,8 +249,8 @@ int deleteFile(FileSystem *fs, const char *filename) // delete the file with the
     /* return all data blocks to tail */
     for (int i = 0; i < file->blockCount; i++)
     {
-        int blkNum = indexEntries[i];
-        returnFreeBlock(fs, &fs->disk[blkNum]);
+        int blocknumber = indexEntries[i];
+        returnFreeBlock(fs, &fs->disk[blocknumber]);
     }
     /* return index block last */
     returnFreeBlock(fs, file->indexBlock);
